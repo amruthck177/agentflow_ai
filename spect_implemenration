@@ -1,0 +1,393 @@
+# Agentflow_AI — Implementation Plan
+
+## Overview
+
+Build **Agentflow_AI**, a full-stack AI Operations Automation Platform where operators describe automations in natural language, visualize them as workflow graphs, and execute them through a chain of cooperating AI agents — with real-time streaming, OAuth integrations, and a full audit trail.
+
+The build follows the **6 phases** prescribed in the spec sheet and is bootstrapped from scratch inside `c:\Users\amrut\OneDrive\Desktop\SPECT\`.
+
+---
+
+## Project Root Layout
+
+```
+SPECT/
+├── client/     ← Next.js 14 (Pages Router) frontend
+├── server/     ← Node.js / Express backend
+├── README.md   ← already created
+└── spect.md    ← source of truth
+```
+
+---
+
+## Phase 1 — Foundation: Auth, AppShell, and Scaffolding
+
+### Goal
+Bootstrap both apps, wire up authentication end-to-end, and render the AppShell layout.
+
+---
+
+### Backend — `server/`
+
+#### [NEW] `server/package.json`
+Express, Mongoose, JWT, bcryptjs, helmet, morgan, compression, cors, dotenv, express-validator, express-rate-limit, socket.io, ioredis, bullmq, @google/generative-ai, langchain, @langchain/langgraph, openai, googleapis, node-cron, uuid.
+
+#### [NEW] `server/src/config/env.js`
+Centralised env loader — validates and exports all `process.env` values.
+
+#### [NEW] `server/src/config/db.js`
+MongoDB connect with `mongoose` + in-memory fallback via `mongodb-memory-server`.
+
+#### [NEW] `server/src/config/socket.js`
+Creates and exports the Socket.IO server instance attached to the HTTP server.
+
+#### [NEW] `server/src/models/User.js`
+Schema: name, email, password (`select: false`), role (`admin|operator`), lastLogin.
+
+#### [NEW] `server/src/models/Workflow.js`
+Schema: name, description, owner (ref User), status, triggerConfig, nodes[], edges[], version, tags[].
+
+#### [NEW] `server/src/models/Execution.js`
+Schema: workflowId, snapshot, status (PENDING|RUNNING|COMPLETED|FAILED|RETRYING|PAUSED|CANCELLED), currentNode, startTime, endTime, duration, inputs, outputs, error, retryCount.
+
+#### [NEW] `server/src/models/ExecutionLog.js`
+Schema: executionId, workflowId, nodeId, agent (planner|execution|validation|recovery|monitoring), level (info|warning|error|success), message, metadata.
+
+#### [NEW] `server/src/models/Integration.js`
+Schema: owner, provider, isConnected, scopes[], encryptedAccessToken, encryptedRefreshToken, expiresAt.
+
+#### [NEW] `server/src/models/Notification.js`
+Schema: owner, workflowId, executionId, type, title, message, isRead.
+
+#### [NEW] `server/src/services/authService.js`
+register, login, getProfile — bcrypt at cost 12, JWT sign/verify.
+
+#### [NEW] `server/src/controllers/authController.js`
+Thin request/response layer delegating to authService.
+
+#### [NEW] `server/src/routes/authRoutes.js`
+POST /register, POST /login, GET /me — with express-validator rules and rate-limit on auth endpoints.
+
+#### [NEW] `server/src/middleware/auth.js`
+JWT verification middleware — attaches `req.user`.
+
+#### [NEW] `server/src/middleware/errorHandler.js`
+Global Express error handler — formats all errors uniformly.
+
+#### [NEW] `server/src/middleware/validate.js`
+Runs express-validator result check and returns 422 on failure.
+
+#### [NEW] `server/index.js`
+Entry point — wires Express app, routes, helmet, morgan, CORS, Socket.IO, starts HTTP server.
+
+#### [NEW] `server/.env.example`
+Template with all required env vars documented.
+
+#### [NEW] `server/.gitignore`
+
+---
+
+### Frontend — `client/`
+
+#### [NEW] `client/` (scaffolded via `npx create-next-app`)
+Next.js 14, Pages Router, Tailwind CSS, ESLint.
+
+#### [NEW] `client/package.json`
+Additional deps: zustand, axios, @xyflow/react, socket.io-client, lucide-react.
+
+#### [NEW] `client/src/services/api.js`
+Axios instance with base URL from `NEXT_PUBLIC_API_URL`, JWT interceptor, error normalisation.
+
+#### [NEW] `client/src/services/socket.js`
+Socket.IO client singleton — connects with auth token.
+
+#### [NEW] `client/src/store/authStore.js`
+Zustand store: user, token, login(), logout(), fetchMe() — persisted to localStorage.
+
+#### [NEW] `client/src/store/workflowStore.js`
+Zustand store: workflows[], activeWorkflow, executions[], loading states.
+
+#### [NEW] `client/src/components/ProtectedRoute/index.jsx`
+Wraps pages — redirects to `/login` if unauthenticated.
+
+#### [NEW] `client/src/components/AppShell/index.jsx`
+Sidebar navigation, top bar, notifications drawer, layout wrapper.
+
+#### [NEW] `client/src/pages/_app.js`
+Global layout with AppShell, Zustand hydration.
+
+#### [NEW] `client/src/pages/index.js`
+Landing page — redirects authenticated → `/dashboard`, unauthenticated → `/login`.
+
+#### [NEW] `client/src/pages/login.js`
+Login form with JWT handling, Zustand persistence, validation, error states.
+
+#### [NEW] `client/src/pages/register.js`
+Registration form with password validation.
+
+#### [NEW] `client/.env.local.example`
+Template.
+
+#### [NEW] `client/.gitignore`
+
+---
+
+## Phase 2 — Workflow CRUD and React Flow Canvas
+
+### Goal
+Full workflow management: list, create, edit on a canvas, save, duplicate, delete.
+
+---
+
+### Backend
+
+#### [NEW] `server/src/services/workflowService.js`
+create, list (paginated), getById, update, duplicate, delete, getDashboardStats.
+
+#### [NEW] `server/src/controllers/workflowController.js`
+
+#### [NEW] `server/src/routes/workflowRoutes.js`
+All 9 workflow endpoints including `/dashboard` and `/generate` stub.
+
+---
+
+### Frontend
+
+#### [NEW] `client/src/components/NodePalette/index.jsx`
+Draggable node types: Trigger, Action, Condition, Integration, AI, End.
+
+#### [NEW] `client/src/components/WorkflowCanvas/index.jsx`
+React Flow canvas: custom node renderer, animated edges, drop-from-palette, mini-map, controls.
+
+#### [NEW] `client/src/components/NodeConfigPanel/index.jsx`
+Right-side panel — renders config form for the selected node type.
+
+#### [NEW] `client/src/components/WorkflowToolbar/index.jsx`
+Save, Run, Duplicate, Delete, Version badge.
+
+#### [NEW] `client/src/pages/workflows/index.js`
+List page — search, filter, pagination, create button.
+
+#### [NEW] `client/src/pages/workflows/builder.js`
+Prompt-to-workflow builder page (canvas + prompt panel, generation preview).
+
+#### [NEW] `client/src/pages/workflows/[id].js`
+Full workflow editor: palette + canvas + config panel + execution controls.
+
+---
+
+## Phase 3 — AI Prompt-to-Workflow Generation
+
+### Goal
+`POST /api/workflows/generate` accepts a natural-language prompt and returns a complete workflow graph.
+
+---
+
+### Backend
+
+#### [NEW] `server/src/services/aiService.js`
+- **Primary**: OpenRouter API (when `OPENROUTER_API_KEY` is set)
+- **Fallback**: Google Gemini (`@google/generative-ai`)
+- **Last resort**: Deterministic rule-based builder for common patterns (send email, invoice routing, Slack/Discord notification, sheet append)
+- Returns `{ nodes, edges, name, description }`
+
+#### [MODIFY] `server/src/controllers/workflowController.js`
+Wire `generateWorkflow` controller.
+
+#### [MODIFY] `server/src/routes/workflowRoutes.js`
+Activate `POST /api/workflows/generate`.
+
+---
+
+### Frontend
+
+#### [MODIFY] `client/src/pages/workflows/builder.js`
+- `PromptInputPanel` — textarea + submit
+- `GraphPreviewPanel` — shows raw JSON before saving
+- Live canvas preview after generation
+
+---
+
+## Phase 4 — Multi-Agent Orchestration Engine
+
+### Goal
+Execute workflows through the 5-agent chain with full lifecycle control (pause, resume, cancel).
+
+---
+
+### Backend
+
+#### [NEW] `server/src/agents/plannerAgent.js`
+Determines node execution order, emits confidence score, returns plan.
+
+#### [NEW] `server/src/agents/executionAgent.js`
+Runs each node against the correct integration or AI provider.
+
+#### [NEW] `server/src/agents/validationAgent.js`
+Verifies required output fields after each node.
+
+#### [NEW] `server/src/agents/recoveryAgent.js`
+Classifies failures: `MISSING_FIELDS | API_FAILURE | AUTH_EXPIRED | RATE_LIMIT | TRANSIENT` → decides `retry_with_backoff | escalate`.
+
+#### [NEW] `server/src/agents/monitoringAgent.js`
+Emits timeline events (ExecutionLog rows + Socket.IO events).
+
+#### [NEW] `server/src/agents/orchestrator.js`
+Chains all 5 agents. Reports `langGraph: 'available' | 'not-installed'`. Writes one `ExecutionLog` per agent event. Emits Socket.IO event per step. Manages `PAUSED` / `CANCELLED` state checks between nodes.
+
+#### [NEW] `server/src/services/executionService.js`
+create, getById, getTimeline, pause, resume, cancel — all persisted to `Execution` + `ExecutionLog` collections.
+
+#### [NEW] `server/src/controllers/executionController.js`
+
+#### [NEW] `server/src/routes/executionRoutes.js`
+All 6 execution endpoints.
+
+---
+
+### Frontend
+
+#### [NEW] `client/src/pages/executions/index.js`
+List with status badges, duration, filter/sort, pagination, live Socket.IO updates.
+
+#### [NEW] `client/src/pages/executions/[id].js`
+Timeline view — color-coded agent badges (planner / execution / validation / recovery / monitoring), live streaming, pause/resume/cancel controls.
+
+#### [NEW] `client/src/pages/dashboard.js`
+MetricGrid (workflow count, execution count, success rate, active runs), recent executions, AI activity feed.
+
+#### [NEW] `client/src/components/MetricGrid/index.jsx`
+4-card metric display with animated counters.
+
+---
+
+## Phase 5 — OAuth Integrations
+
+### Goal
+Gmail, Slack, Discord, and Google Sheets connected via OAuth 2.0 with encrypted token storage.
+
+---
+
+### Backend
+
+#### [NEW] `server/src/integrations/baseIntegration.js`
+Abstract interface: `connect()`, `disconnect()`, `execute(action, params)`, `getStatus()`.
+
+#### [NEW] `server/src/integrations/gmailIntegration.js`
+Actions: `sendMail`, `readMail`. OAuth start + callback.
+
+#### [NEW] `server/src/integrations/slackIntegration.js`
+Actions: `postMessage`, `subscribeToEvents`.
+
+#### [NEW] `server/src/integrations/discordIntegration.js`
+Actions: `postBotMessage`.
+
+#### [NEW] `server/src/integrations/googleSheetsIntegration.js`
+Actions: `appendRow`, `readRange`.
+
+#### [NEW] `server/src/services/integrationService.js`
+Handles token encryption/decryption (`CREDENTIAL_ENCRYPTION_KEY`), OAuth token exchange, status checks, `INTEGRATION_NOT_CONNECTED` / `AUTH_EXPIRED` error surfaces.
+
+#### [NEW] `server/src/controllers/integrationController.js`
+
+#### [NEW] `server/src/routes/integrationRoutes.js`
+All 7 integration + notification endpoints.
+
+---
+
+### Frontend
+
+#### [NEW] `client/src/pages/integrations.js`
+Status cards for Gmail, Slack, Discord, Google Sheets — OAuth connect/disconnect buttons, token expiry indicators.
+
+#### [NEW] `client/src/pages/settings.js`
+Profile management, role display, API key health, encryption key health, theme toggle.
+
+---
+
+## Phase 6 — Queues, Real-Time Streaming, and Notifications
+
+### Goal
+BullMQ job queue for background execution and retries, Socket.IO live event streaming, and persistent notification drawer.
+
+---
+
+### Backend
+
+#### [NEW] `server/src/queues/executionQueue.js`
+BullMQ `Queue` + `Worker` on Redis. In-memory fallback (`Map`-based) when Redis is absent. Handles retry backoff scheduling. Calls orchestrator from the worker.
+
+#### [MODIFY] `server/src/agents/monitoringAgent.js`
+Persists `Notification` documents on success/failure/escalation events.
+
+#### [MODIFY] `server/src/routes/integrationRoutes.js`
+Activate `GET /api/notifications`.
+
+#### [MODIFY] `server/src/config/socket.js`
+Full event broadcast per agent step: `planner`, `execution`, `validation`, `recovery`, `monitoring`.
+
+---
+
+### Frontend
+
+#### [MODIFY] `client/src/components/AppShell/index.jsx`
+Notifications drawer (bell icon) — fetches unread notifications, marks as read.
+
+#### [MODIFY] `client/src/pages/executions/[id].js`
+Subscribe to `execution:{id}` Socket.IO room, render live timeline as events arrive.
+
+#### [MODIFY] `client/src/services/socket.js`
+Room join/leave helpers, typed event handlers.
+
+---
+
+## Verification Plan
+
+### Automated Checks (per phase)
+
+```bash
+# Backend health
+curl http://localhost:5000/api/health
+
+# Auth round-trip
+curl -X POST http://localhost:5000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test","email":"test@test.com","password":"Test@1234"}'
+
+# Workflow generation (deterministic fallback)
+curl -X POST http://localhost:5000/api/workflows/generate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Send a Slack notification when a new row is added to Google Sheets"}'
+
+# Execute a workflow
+curl -X POST http://localhost:5000/api/workflows/<id>/execute \
+  -H "Authorization: Bearer <token>"
+```
+
+### Manual UI Verification
+
+| Page | Check |
+|---|---|
+| `/login` | JWT issued, Zustand persisted, redirect to dashboard |
+| `/dashboard` | MetricGrid loads, no console errors |
+| `/workflows/builder` | Prompt → graph rendered on canvas |
+| `/workflows/[id]` | Drag node from palette, configure, save |
+| `/executions/[id]` | Agent timeline streams live via Socket.IO |
+| `/integrations` | OAuth buttons redirect correctly |
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **Project directory**: I will scaffold `client/` and `server/` directly inside `c:\Users\amrut\OneDrive\Desktop\SPECT\`. Confirm this is the right root, or specify a different path.
+
+> [!IMPORTANT]
+> **AI Keys**: Do you have an `OPENROUTER_API_KEY` or `GEMINI_API_KEY` ready to provide? Without them the deterministic fallback will be used for generation — still functional but limited.
+
+> [!NOTE]
+> **OAuth Integrations**: Gmail, Slack, Discord, and Google Sheets OAuth flows require external app registrations. The app will work without them — missing credentials will surface as explicit `INTEGRATION_NOT_CONNECTED` errors, not crashes.
+
+> [!NOTE]
+> **Redis**: If Redis is not installed, the in-memory BullMQ fallback will be used automatically. Jobs will not survive process restarts in that mode.
