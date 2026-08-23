@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # Backend API Server
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: agentflow_server
+    restart: always
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./server/.env
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+
+  # Frontend Next.js Client
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:5000/api
+        NEXT_PUBLIC_SOCKET_URL: http://localhost:5000
+    container_name: agentflow_client
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
